@@ -44,14 +44,25 @@ function connectCoinbase() {
 // Connect to Polymarket (using their API)
 async function fetchPolymarketPrice() {
   try {
-    // Polymarket BTC market - you may need to find the correct market ID
-    const response = await fetch('https://clob.polymarket.com/prices-history?market=21742633143463906290569050155826241533067272736897614950488156847949938836455&interval=max&fidelity=1');
+    // Using Polymarket's gamma API for BTC price markets
+    const response = await fetch('https://gamma-api.polymarket.com/markets?closed=false&limit=100');
     const data = await response.json();
     
-    if (data && data.history && data.history.length > 0) {
-      const latest = data.history[data.history.length - 1];
-      // Polymarket prices are in probability format, need to convert
-      polymarketPrice = (parseFloat(latest.p) * 100000).toFixed(2);
+    // Find BTC related market
+    const btcMarket = data.find(m => 
+      m.question && (
+        m.question.toLowerCase().includes('bitcoin') || 
+        m.question.toLowerCase().includes('btc')
+      ) && m.question.toLowerCase().includes('price')
+    );
+    
+    if (btcMarket && btcMarket.outcomePrices) {
+      // Get the price from the market
+      const price = btcMarket.outcomePrices[0] || btcMarket.outcomePrices[1];
+      polymarketPrice = (parseFloat(price) * 100000).toFixed(2);
+      console.log(`📊 Polymarket Market: ${btcMarket.question}`);
+    } else {
+      console.log('⚠️  BTC market not found on Polymarket');
     }
   } catch (error) {
     console.error('❌ Error fetching Polymarket price:', error.message);
