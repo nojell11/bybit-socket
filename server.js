@@ -1,7 +1,8 @@
 // server.js
-const WebSocket = require('ws');
-const express = require('express');
-const http = require('http');
+import WebSocket from 'ws';
+import express from 'express';
+import http from 'http';
+import { RealtimeServiceV2 } from '@polymarket/sdk';
 
 const app = express();
 const server = http.createServer(app);
@@ -41,58 +42,43 @@ function connectCoinbase() {
   });
 }
 
-// Connect to Polymarket (using their API)
-async function fetchPolymarketPrice() {
-  try {
-    // Using Polymarket's gamma API for active BTC markets
-    const response = await fetch('https://gamma-api.polymarket.com/markets?closed=false&active=true&limit=200');
-    const data = await response.json();
+// Connect to Polymarket WebSocket for BTC price
+function connectPolymarket() {
+  console.log('🔌 Connecting to Polymarket WebSocket...');
+  
+  const realtime = new RealtimeServiceV2({ debug: false });
+  
+  realtime.once('connected', () => {
+    console.log('✅ Connected to Polymarket WebSocket');
     
-    // Find the most recent "Bitcoin Up or Down" market
-    const btcMarket = data.find(m => 
-      m.question && 
-      m.question.includes('Bitcoin') && 
-      m.question.includes('Up or Down')
-    );
+    // Subscribe to BTC price updates
+    const cryptoSub = realtime.subscribeCryptoPrices(['BTCUSDT'], {
+      onPrice: (price) => {
+        if (price.symbol === 'BTCUSDT') {
+          polymarketPrice = price.price.toFixed(2);
+          console.log(`📊 Polymarket BTC Update: $${polymarketPrice}`);
+          broadcastPrices();
+        }
+      },
+      onError: (error) => {
+        console.error('❌ Polymarket price error:', error);
+      }
+    });
     
-    if (btcMarket) {
-      console.log(`📊 Found Polymarket Market: "${btcMarket.question}"`);
-      
-      // Try to extract the target price from description or market data
-      if (btcMarket.description) {
-        const priceMatch = btcMarket.description.match(/\$([0-9,]+(?:\.[0-9]{2})?)/);
-        if (priceMatch) {
-          polymarketPrice = priceMatch[1].replace(/,/g, '');
-          console.log(`✅ Polymarket target price: ${polymarketPrice}`);
-          return;
-        }
-      }
-      
-      // If no price in description, try to get it from the market metadata
-      if (btcMarket.markets && btcMarket.markets[0]) {
-        const market = btcMarket.markets[0];
-        if (market.groupItemTitle) {
-          const priceMatch = market.groupItemTitle.match(/\$([0-9,]+(?:\.[0-9]{2})?)/);
-          if (priceMatch) {
-            polymarketPrice = priceMatch[1].replace(/,/g, '');
-            console.log(`✅ Polymarket target price: ${polymarketPrice}`);
-            return;
-          }
-        }
-      }
-      
-      console.log('⚠️  Could not extract price from Polymarket market data');
-    } else {
-      console.log('⚠️  No active Bitcoin Up or Down markets found');
-    }
-  } catch (error) {
-    console.error('❌ Error fetching Polymarket price:', error.message);
-  }
-}
+    console.log(`✅ Subscribed to Polymarket BTC prices (ID: ${cryptoSub.id})`);
+  });
 
-// Poll Polymarket every 10 seconds (they don't have public WebSocket)
-setInterval(fetchPolymarketPrice, 10000);
-fetchPolymarketPrice();
+  realtime.on('error', (error) => {
+    console.error('❌ Polymarket WebSocket error:', error);
+  });
+
+  realtime.on('disconnected', () => {
+    console.log('⚠️  Polymarket disconnected. Reconnecting...');
+    setTimeout(connectPolymarket, 5000);
+  });
+
+  realtime.connect();
+}
 
 // Log prices every second
 setInterval(() => {
@@ -185,4 +171,5 @@ server.listen(PORT, () => {
   console.log(`📡 WebSocket endpoint: ws://localhost:${PORT}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   connectCoinbase();
+  connectPolymarket();
 });
