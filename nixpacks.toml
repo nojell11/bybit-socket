@@ -1,0 +1,12 @@
+providers = ["nixpacks"]
+[nixpacks.providers.nixpacks.depends]
+nixpacks = { version = "1" }
+
+[phases.setup]
+nixPkgs = ['python311', 'nodejs']
+
+[phases.build]
+cmds = []
+
+[phases.setup]
+nixPkgs = ['...', 'gcc']
