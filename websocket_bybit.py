@@ -105,16 +105,27 @@ def polymarket_ws():
             data = json.loads(message)
             asset_id = data.get('asset_id', '')
             
-            # Snapshot
-            if 'bids' in data and isinstance(data['bids'], list) and len(data['bids']) > 0:
-                price = float(data['bids'][0].get('price', 0)) * 100
-                
-                if asset_id == token_id_up:
-                    poly_up_price = price
-                elif asset_id == token_id_down:
-                    poly_down_price = price
+            # Handle bids array (snapshot)
+            if 'bids' in data:
+                bids = data['bids']
+                if isinstance(bids, list) and len(bids) > 0:
+                    # Get first bid
+                    first_bid = bids[0]
+                    
+                    # Could be dict or list
+                    if isinstance(first_bid, dict):
+                        price = float(first_bid.get('price', 0)) * 100
+                    elif isinstance(first_bid, list) and len(first_bid) >= 2:
+                        price = float(first_bid[0]) * 100
+                    else:
+                        return
+                    
+                    if asset_id == token_id_up:
+                        poly_up_price = price
+                    elif asset_id == token_id_down:
+                        poly_down_price = price
             
-            # Real-time updates
+            # Handle price_changes (real-time)
             elif 'price_changes' in data:
                 changes = data.get('price_changes', [])
                 
