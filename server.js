@@ -38,7 +38,7 @@ function connectCoinbase() {
 
   coinbaseWs.on('close', () => {
     console.log('⚠️  Coinbase connection closed. Reconnecting...');
-    setTimeout(connectCoinbase, 5000);
+    setTimeout(connectCoinbase, 1000);
   });
 }
 
