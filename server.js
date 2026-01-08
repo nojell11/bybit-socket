@@ -42,28 +42,51 @@ function connectCoinbase() {
   });
 }
 
-// Connect to Binance WebSocket (alternative to Polymarket's private SDK)
-// Binance is one of the sources that Chainlink (used by Polymarket) aggregates from
+// Connect to Polymarket RTDS (Real-Time Data Stream) WebSocket
+// Official endpoint: wss://ws-live-data.polymarket.com
 function connectPolymarket() {
-  const binanceWs = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
+  const polyWs = new WebSocket('wss://ws-live-data.polymarket.com');
   
-  binanceWs.on('open', () => {
-    console.log('✅ Connected to Polymarket (Binance) WebSocket');
+  polyWs.on('open', () => {
+    console.log('✅ Connected to Polymarket RTDS WebSocket');
+    
+    // Subscribe to crypto prices (BTC)
+    const subscribeMessage = {
+      action: 'subscribe',
+      subscriptions: [{
+        topic: 'crypto_prices',
+        type: 'update',
+        filters: '["BTCUSDT"]'
+      }]
+    };
+    
+    polyWs.send(JSON.stringify(subscribeMessage));
+    console.log('📊 Subscribed to Polymarket BTC prices');
   });
 
-  binanceWs.on('message', (data) => {
-    const msg = JSON.parse(data);
-    if (msg.c) { // 'c' is current price
-      polymarketPrice = parseFloat(msg.c).toFixed(2);
-      broadcastPrices();
+  polyWs.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data);
+      
+      // Handle crypto price updates
+      if (msg.topic === 'crypto_prices' && msg.type === 'update') {
+        const payload = msg.payload;
+        if (payload && payload.symbol === 'BTCUSDT' && payload.price) {
+          polymarketPrice = parseFloat(payload.price).toFixed(2);
+          console.log(`📊 Polymarket BTC Update: ${polymarketPrice}`);
+          broadcastPrices();
+        }
+      }
+    } catch (error) {
+      // Ignore parsing errors for heartbeat/system messages
     }
   });
 
-  binanceWs.on('error', (error) => {
+  polyWs.on('error', (error) => {
     console.error('❌ Polymarket WebSocket error:', error.message);
   });
 
-  binanceWs.on('close', () => {
+  polyWs.on('close', () => {
     console.log('⚠️  Polymarket connection closed. Reconnecting...');
     setTimeout(connectPolymarket, 5000);
   });
@@ -221,8 +244,8 @@ app.get('/', (req, res) => {
           <p><strong>WebSocket:</strong> <code>wss://${req.headers.host}</code></p>
           <p><strong>Active Connections:</strong> ${wss.clients.size}</p>
           <p style="margin-top: 15px; font-size: 11px;">
-            Polymarket uses Chainlink which aggregates from multiple exchanges including Binance.
-            This monitor compares Coinbase vs Binance prices in real-time.
+            Using official Polymarket RTDS (Real-Time Data Stream) WebSocket for crypto prices.
+            Comparing Coinbase exchange vs Polymarket's official BTC price feed.
           </p>
         </div>
       </div>
