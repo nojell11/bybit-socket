@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python websocket_bybit.py"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
