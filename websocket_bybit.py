@@ -2,20 +2,49 @@ import websocket
 import ssl
 import json
 import time
+import requests
+from collections import defaultdict
 
-# Full order book (top 10 levels)
+# Order book storage
 bids = {}
 asks = {}
 
+def get_rest_snapshot():
+    """Get initial order book snapshot from REST API"""
+    global bids, asks
+    url = "https://api.coinbase.com/api/v3/brokerage/products/BTC-USD/book?level=2"
+    response = requests.get(url, timeout=10)
+    data = response.json()
+    
+    bids.clear()
+    asks.clear()
+    
+    for bid in data['pricebooks'][0]['bids']:
+        price = float(bid[0])
+        size = float(bid[1])
+        bids[price] = size
+    
+    for ask in data['pricebooks'][0]['asks']:
+        price = float(ask[0])
+        size = float(ask[1])
+        asks[price] = size
+    
+    top_bid = max(bids.keys()) if bids else 0
+    top_ask = min(asks.keys()) if asks else 0
+    print(f"REST Snapshot: Bid {top_bid:.2f} | Ask {top_ask:.2f}")
+
 def on_open(ws):
     print("Connected to Coinbase Advanced Trade")
-    # Subscribe to level2 + heartbeats
+    # Get REST snapshot FIRST
+    get_rest_snapshot()
+    
+    # Then subscribe
     sub_msg = [{
         "type": "subscribe",
         "product_ids": ["BTC-USD"],
         "channel": "level2"
     }, {
-        "type": "subscribe", 
+        "type": "subscribe",
         "product_ids": ["BTC-USD"],
         "channel": "heartbeats"
     }]
@@ -30,33 +59,25 @@ def on_message(ws, message):
         print(f"Heartbeat: {data['events'][0]['heartbeat_counter']}")
         return
     
-    if data.get('channel') == 'level2':
-        if data.get('type') == 'snapshot':
-            # Load initial snapshot
-            for bid in data['bids']:
-                price = float(bid[0])
-                bids[price] = float(bid[1])
-            for ask in data['asks']:
-                price = float(ask[0])
-                asks[price] = float(ask[1])
-        elif data.get('type') == 'l2update':
-            # Apply deltas
-            for change in data['changes']:
-                side, price_str, size_str = change
-                price = float(price_str)
-                size = float(size_str)
-                if size == 0:
-                    if side == 'buy':
-                        bids.pop(price, None)
-                    else:
-                        asks.pop(price, None)
-                else:
-                    if side == 'buy':
-                        bids[price] = size
-                    else:
-                        asks[price] = size
+    if data.get('channel') == 'level2' and data.get('product_id') == 'BTC-USD':
+        changes = data.get('changes', [])
+        for change in changes:
+            side, price_str, size_str = change
+            price = float(price_str)
+            size = float(size_str)
+            
+            if size == 0:
+                if side == 'bid':
+                    bids.pop(price, None)
+                elif side == 'ask':
+                    asks.pop(price, None)
+            else:
+                if side == 'bid':
+                    bids[price] = size
+                elif side == 'ask':
+                    asks[price] = size
         
-        # Get top bid/ask
+        # Print top bid/ask every update
         top_bid = max(bids.keys()) if bids else 0.0
         top_ask = min(asks.keys()) if asks else 0.0
         print(f"BTC-USD: Bid {top_bid:.2f} | Ask {top_ask:.2f} | Time: {time.time():.0f}")
