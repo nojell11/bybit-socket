@@ -46,13 +46,14 @@ function connectCoinbase() {
 // Official endpoint: wss://ws-live-data.polymarket.com
 function connectPolymarket() {
   const polyWs = new WebSocket('wss://ws-live-data.polymarket.com');
+  let isConnected = false;
   
   polyWs.on('open', () => {
     console.log('✅ Connected to Polymarket RTDS WebSocket');
+    isConnected = true;
     
-    // Subscribe to crypto prices (BTC)
+    // Subscribe to crypto prices (BTC) - using correct Polymarket protocol
     const subscribeMessage = {
-      action: 'subscribe',
       subscriptions: [{
         topic: 'crypto_prices',
         type: 'update',
@@ -68,7 +69,7 @@ function connectPolymarket() {
     try {
       const msg = JSON.parse(data);
       
-      // Handle crypto price updates
+      // Handle different message types
       if (msg.topic === 'crypto_prices' && msg.type === 'update') {
         const payload = msg.payload;
         if (payload && payload.symbol === 'BTCUSDT' && payload.price) {
@@ -76,9 +77,16 @@ function connectPolymarket() {
           console.log(`📊 Polymarket BTC Update: ${polymarketPrice}`);
           broadcastPrices();
         }
+      } else if (msg.event === 'connected') {
+        console.log('✅ Polymarket connection confirmed');
+      } else if (msg.event === 'subscribed') {
+        console.log('✅ Polymarket subscription confirmed');
       }
     } catch (error) {
       // Ignore parsing errors for heartbeat/system messages
+      if (data.toString() !== 'PONG') {
+        console.error('❌ Error parsing Polymarket message:', error.message);
+      }
     }
   });
 
@@ -88,8 +96,18 @@ function connectPolymarket() {
 
   polyWs.on('close', () => {
     console.log('⚠️  Polymarket connection closed. Reconnecting...');
+    isConnected = false;
     setTimeout(connectPolymarket, 5000);
   });
+  
+  // Send ping every 30 seconds to keep connection alive
+  const pingInterval = setInterval(() => {
+    if (isConnected && polyWs.readyState === WebSocket.OPEN) {
+      polyWs.send('PING');
+    } else {
+      clearInterval(pingInterval);
+    }
+  }, 30000);
 }
 
 // Log prices every second
