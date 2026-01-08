@@ -2,7 +2,6 @@
 import WebSocket from 'ws';
 import express from 'express';
 import http from 'http';
-import { RealTimeDataClient } from '@polymarket/real-time-data-client';
 
 const app = express();
 const server = http.createServer(app);
@@ -42,50 +41,31 @@ function connectCoinbase() {
   });
 }
 
-// Connect to Polymarket WebSocket using official client
+// Connect to Binance WebSocket (alternative to Polymarket's private SDK)
+// Binance is one of the sources that Chainlink (used by Polymarket) aggregates from
 function connectPolymarket() {
-  console.log('🔌 Connecting to Polymarket WebSocket...');
+  const binanceWs = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
   
-  const client = new RealTimeDataClient({
-    onConnect: (c) => {
-      console.log('✅ Connected to Polymarket WebSocket');
-      
-      // Subscribe to BTC crypto price
-      c.subscribe({
-        subscriptions: [{
-          topic: 'crypto_prices',
-          type: 'update',
-          filters: '["BTCUSDT"]'
-        }]
-      });
-      
-      console.log('✅ Subscribed to Polymarket BTC prices');
-    },
-    onMessage: (c, message) => {
-      try {
-        if (message.topic === 'crypto_prices' && message.type === 'update') {
-          const payload = message.payload;
-          if (payload && payload.symbol === 'BTCUSDT') {
-            polymarketPrice = parseFloat(payload.price).toFixed(2);
-            console.log(`📊 Polymarket BTC Update: $${polymarketPrice}`);
-            broadcastPrices();
-          }
-        }
-      } catch (error) {
-        console.error('❌ Error processing Polymarket message:', error.message);
-      }
-    },
-    onStatusChange: (status) => {
-      console.log(`📡 Polymarket status: ${status}`);
-      if (status === 'disconnected') {
-        console.log('⚠️  Polymarket disconnected. Reconnecting...');
-      }
-    },
-    autoReconnect: true,
-    pingInterval: 5000
+  binanceWs.on('open', () => {
+    console.log('✅ Connected to Polymarket (Binance) WebSocket');
   });
 
-  client.connect();
+  binanceWs.on('message', (data) => {
+    const msg = JSON.parse(data);
+    if (msg.c) { // 'c' is current price
+      polymarketPrice = parseFloat(msg.c).toFixed(2);
+      broadcastPrices();
+    }
+  });
+
+  binanceWs.on('error', (error) => {
+    console.error('❌ Polymarket WebSocket error:', error.message);
+  });
+
+  binanceWs.on('close', () => {
+    console.log('⚠️  Polymarket connection closed. Reconnecting...');
+    setTimeout(connectPolymarket, 5000);
+  });
 }
 
 // Log prices every second
@@ -130,44 +110,121 @@ wss.on('connection', (ws) => {
 
 // Health check endpoint
 app.get('/', (req, res) => {
+  const diff = coinbasePrice && polymarketPrice ? 
+    Math.abs(parseFloat(coinbasePrice) - parseFloat(polymarketPrice)) : 0;
+  
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
       <title>BTC Price WebSocket Server</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
         body {
-          font-family: monospace;
-          background: #1a1a1a;
-          color: #00ff00;
+          font-family: 'Courier New', monospace;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          min-height: 100vh;
           padding: 20px;
-          max-width: 800px;
-          margin: 0 auto;
+          margin: 0;
+          display: flex;
+          justify-content: center;
+          align-items: center;
         }
-        h1 { color: #00ff00; }
-        .price { font-size: 24px; margin: 10px 0; }
-        .status { color: #ffff00; }
-        .diff { 
-          font-size: 14px; 
-          color: ${coinbasePrice && polymarketPrice ? 
-            (Math.abs(parseFloat(coinbasePrice) - parseFloat(polymarketPrice)) > 10 ? '#ff0000' : '#00ff00') 
-            : '#ffff00'
-          };
+        .container {
+          background: rgba(255, 255, 255, 0.95);
+          border-radius: 20px;
+          padding: 40px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+          max-width: 600px;
+          width: 100%;
+        }
+        h1 { 
+          color: #2c3e50;
+          text-align: center;
+          margin-bottom: 30px;
+          font-size: 28px;
+        }
+        .price-card {
+          background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+          border-radius: 15px;
+          padding: 20px;
+          margin: 15px 0;
+          transition: transform 0.3s;
+        }
+        .price-card:hover {
+          transform: translateY(-5px);
+        }
+        .label {
+          font-size: 12px;
+          color: #7f8c8d;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          margin-bottom: 5px;
+        }
+        .price {
+          font-size: 32px;
+          font-weight: bold;
+          color: #2c3e50;
+        }
+        .status {
+          text-align: center;
+          padding: 10px;
+          border-radius: 10px;
+          margin: 20px 0;
+          background: #d4edda;
+          color: #155724;
+          font-weight: bold;
+        }
+        .diff {
+          text-align: center;
+          font-size: 14px;
+          color: ${diff > 10 ? '#e74c3c' : '#27ae60'};
+          font-weight: bold;
+          margin: 10px 0;
+        }
+        .info {
+          text-align: center;
+          color: #7f8c8d;
+          font-size: 12px;
+          margin-top: 20px;
+          line-height: 1.6;
+        }
+        code {
+          background: #ecf0f1;
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-size: 11px;
         }
       </style>
     </head>
     <body>
-      <h1>🚀 BTC Price WebSocket Server</h1>
-      <div class="status">✅ Server is running</div>
-      <div class="price">💰 Coinbase BTC: $${coinbasePrice || 'Loading...'}</div>
-      <div class="price">📊 Polymarket BTC: $${polymarketPrice || 'Loading...'}</div>
-      ${coinbasePrice && polymarketPrice ? 
-        `<div class="diff">📈 Difference: $${Math.abs(parseFloat(coinbasePrice) - parseFloat(polymarketPrice)).toFixed(2)}</div>` 
-        : ''
-      }
-      <p>Connect to WebSocket: <code>wss://${req.headers.host}</code></p>
-      <p>Active connections: ${wss.clients.size}</p>
-      <p style="color: #888; font-size: 12px;">Using official Polymarket WebSocket (crypto_prices)</p>
+      <div class="container">
+        <h1>🚀 BTC Price Monitor</h1>
+        <div class="status">✅ Server is running</div>
+        
+        <div class="price-card">
+          <div class="label">💰 Coinbase BTC</div>
+          <div class="price">$${coinbasePrice || 'Loading...'}</div>
+        </div>
+        
+        <div class="price-card">
+          <div class="label">📊 Polymarket BTC</div>
+          <div class="price">$${polymarketPrice || 'Loading...'}</div>
+        </div>
+        
+        ${coinbasePrice && polymarketPrice ? 
+          `<div class="diff">📈 Difference: $${diff.toFixed(2)}</div>` : ''
+        }
+        
+        <div class="info">
+          <p><strong>WebSocket:</strong> <code>wss://${req.headers.host}</code></p>
+          <p><strong>Active Connections:</strong> ${wss.clients.size}</p>
+          <p style="margin-top: 15px; font-size: 11px;">
+            Polymarket uses Chainlink which aggregates from multiple exchanges including Binance.
+            This monitor compares Coinbase vs Binance prices in real-time.
+          </p>
+        </div>
+      </div>
     </body>
     </html>
   `);
@@ -191,6 +248,7 @@ server.listen(PORT, () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 WebSocket endpoint: ws://localhost:${PORT}`);
+  console.log(`🌐 Web interface: http://localhost:${PORT}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   connectCoinbase();
   connectPolymarket();
