@@ -1,1 +1,1 @@
-worker: python websocket_bybit.py
+worker: python -u websocket_bybit.py
