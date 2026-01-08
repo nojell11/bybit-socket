@@ -3,84 +3,70 @@ import ssl
 import json
 import time
 import requests
-from collections import defaultdict
 
-# Order book storage
-bids = {}
-asks = {}
+top_bid = 0.0
+top_ask = 0.0
 
-def get_rest_snapshot():
-    """Get initial order book snapshot from REST API"""
-    global bids, asks
-    url = "https://api.coinbase.com/api/v3/brokerage/products/BTC-USD/book?level=2"
-    response = requests.get(url, timeout=10)
-    data = response.json()
-    
-    bids.clear()
-    asks.clear()
-    
-    for bid in data['pricebooks'][0]['bids']:
-        price = float(bid[0])
-        size = float(bid[1])
-        bids[price] = size
-    
-    for ask in data['pricebooks'][0]['asks']:
-        price = float(ask[0])
-        size = float(ask[1])
-        asks[price] = size
-    
-    top_bid = max(bids.keys()) if bids else 0
-    top_ask = min(asks.keys()) if asks else 0
-    print(f"REST Snapshot: Bid {top_bid:.2f} | Ask {top_ask:.2f}")
+def get_orderbook_snapshot():
+    """Get current best bid/ask from public REST API"""
+    global top_bid, top_ask
+    try:
+        url = "https://api.coinbase.com/api/v3/brokerage/product_book?product_id=BTC-USD&limit=1"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        
+        if 'pricebooks' in data and data['pricebooks']:
+            book = data['pricebooks'][0]
+            if book['bids']:
+                top_bid = float(book['bids'][0][0])
+            if book['asks']:
+                top_ask = float(book['asks'][0][0])
+            print(f"SNAPSHOT: Bid {top_bid:.2f} | Ask {top_ask:.2f}")
+    except Exception as e:
+        print(f"Snapshot error: {e}")
 
 def on_open(ws):
     print("Connected to Coinbase Advanced Trade")
-    # Get REST snapshot FIRST
-    get_rest_snapshot()
+    get_orderbook_snapshot()
     
-    # Then subscribe
     sub_msg = [{
         "type": "subscribe",
         "product_ids": ["BTC-USD"],
-        "channel": "level2"
+        "channels": ["level2"]
     }, {
         "type": "subscribe",
         "product_ids": ["BTC-USD"],
-        "channel": "heartbeats"
+        "channels": ["heartbeats"]
     }]
     for msg in sub_msg:
         ws.send(json.dumps(msg))
 
 def on_message(ws, message):
-    global bids, asks
-    data = json.loads(message)
-    
-    if data.get('channel') == 'heartbeats':
-        print(f"Heartbeat: {data['events'][0]['heartbeat_counter']}")
-        return
-    
-    if data.get('channel') == 'level2' and data.get('product_id') == 'BTC-USD':
-        changes = data.get('changes', [])
-        for change in changes:
-            side, price_str, size_str = change
-            price = float(price_str)
-            size = float(size_str)
-            
-            if size == 0:
-                if side == 'bid':
-                    bids.pop(price, None)
-                elif side == 'ask':
-                    asks.pop(price, None)
-            else:
-                if side == 'bid':
-                    bids[price] = size
-                elif side == 'ask':
-                    asks[price] = size
+    global top_bid, top_ask
+    try:
+        data = json.loads(message)
         
-        # Print top bid/ask every update
-        top_bid = max(bids.keys()) if bids else 0.0
-        top_ask = min(asks.keys()) if asks else 0.0
-        print(f"BTC-USD: Bid {top_bid:.2f} | Ask {top_ask:.2f} | Time: {time.time():.0f}")
+        if data.get('type') == 'heartbeat':
+            print(f"Heartbeat: {data.get('sequence', 'N/A')}")
+            return
+        
+        if data.get('channel') == 'level2':
+            changes = data.get('changes', [])
+            for change in changes:
+                side, price, size = change
+                price = float(price)
+                size = float(size)
+                
+                if size > 0:  # Update top levels only
+                    if side == 'bid' and price > top_bid:
+                        top_bid = price
+                    elif side == 'ask' and (top_ask == 0 or price < top_ask):
+                        top_ask = price
+            
+            print(f"BTC-USD: Bid {top_bid:.2f} | Ask {top_ask:.2f} | Time: {time.time():.0f}")
+            
+    except json.JSONDecodeError:
+        print("JSON decode error:", message[:100])
 
 def on_error(ws, error):
     print(f"Error: {error}")
