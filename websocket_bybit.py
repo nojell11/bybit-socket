@@ -4,6 +4,7 @@ import json
 import time
 import threading
 import requests
+from datetime import datetime
 
 # Price storage
 coinbase_price = 0.0
@@ -20,11 +21,6 @@ def get_current_15min_window():
 def build_market_slug(timestamp):
     """Build slug: btc-updown-15m-{timestamp}"""
     return f"btc-updown-15m-{timestamp}"
-
-def format_window_time(timestamp):
-    """Format timestamp to readable time"""
-    dt = datetime.fromtimestamp(timestamp)
-    return dt.strftime("%I:%M %p ET")
 
 def get_active_poly_market():
     """Get current 15-min BTC market using correct slug format"""
@@ -111,24 +107,29 @@ def coinbase_ws():
             "channel": "level2"
         }))
     
-    ws = websocket.WebSocketApp("wss://advanced-trade-ws.coinbase.com",
-                                on_open=on_open,
-                                on_message=on_message)
-    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+    try:
+        ws = websocket.WebSocketApp("wss://advanced-trade-ws.coinbase.com",
+                                    on_open=on_open,
+                                    on_message=on_message)
+        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+    except Exception as e:
+        print(f"❌ Coinbase crashed: {e}")
 
 def polymarket_ws():
     global poly_up_price, poly_down_price, current_question
     
     token_id_up, token_id_down, question = get_active_poly_market()
     if not token_id_up:
-        print("❌ No Polymarket market - waiting for next window")
+        print("❌ No Polymarket market")
         return
     
     current_question = question
+    print(f"🔄 Connecting to Polymarket WebSocket...")
     
     def on_message(ws, message):
         global poly_up_price, poly_down_price
         try:
+            print(f"📥 Poly message: {message[:200]}")  # Debug first 200 chars
             data = json.loads(message)
             asset_id = data.get('asset_id', '')
             
@@ -138,29 +139,44 @@ def polymarket_ws():
                 
                 if asset_id == token_id_up:
                     poly_up_price = best_bid
+                    print(f"   UP price: {poly_up_price:.2f}¢")
                 elif asset_id == token_id_down:
                     poly_down_price = best_bid
+                    print(f"   DOWN price: {poly_down_price:.2f}¢")
                 
                 if coinbase_price > 0 and poly_up_price > 0 and poly_down_price > 0:
                     format_output()
-        except:
-            pass
+        except Exception as e:
+            print(f"❌ Poly message parse: {e}")
     
     def on_open(ws):
-        print("✅ Polymarket connected")
-        # Subscribe using correct format
-        ws.send(json.dumps({
-            "assets_ids": [token_id_up, token_id_down],
-            "type": "market"
-        }))
+        print("✅ Polymarket WebSocket opened")
+        try:
+            sub_msg = {
+                "assets_ids": [token_id_up, token_id_down],
+                "type": "market"
+            }
+            print(f"📤 Sending subscription: {json.dumps(sub_msg)[:150]}")
+            ws.send(json.dumps(sub_msg))
+            print("✅ Polymarket subscribed")
+        except Exception as e:
+            print(f"❌ Subscription failed: {e}")
+    
+    def on_error(ws, error):
+        print(f"❌ Polymarket WebSocket error: {error}")
+    
+    def on_close(ws, close_status_code, close_msg):
+        print(f"🔌 Polymarket closed: {close_status_code} - {close_msg}")
     
     def keep_alive(ws):
-        """Send PING every 10 seconds"""
+        time.sleep(15)  # Wait for connection first
         while True:
-            time.sleep(10)
             try:
+                print("💓 Sending PING")
                 ws.send("PING")
-            except:
+                time.sleep(10)
+            except Exception as e:
+                print(f"❌ PING failed: {e}")
                 break
     
     def on_open_with_keepalive(ws):
@@ -168,13 +184,20 @@ def polymarket_ws():
         ping_thread = threading.Thread(target=keep_alive, args=(ws,), daemon=True)
         ping_thread.start()
     
-    ws = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com",
-                                on_open=on_open_with_keepalive,
-                                on_message=on_message)
-    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+    try:
+        ws = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com",
+                                    on_open=on_open_with_keepalive,
+                                    on_message=on_message,
+                                    on_error=on_error,
+                                    on_close=on_close)
+        print("🔄 Starting WebSocket run_forever...")
+        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+    except Exception as e:
+        print(f"❌ Polymarket WebSocket crashed: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    from datetime import datetime
     print("🚀 Coinbase vs Polymarket Arb Monitor\n")
     
     t1 = threading.Thread(target=coinbase_ws, daemon=True)
