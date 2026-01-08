@@ -44,25 +44,46 @@ function connectCoinbase() {
 // Connect to Polymarket (using their API)
 async function fetchPolymarketPrice() {
   try {
-    // Using Polymarket's gamma API for BTC price markets
-    const response = await fetch('https://gamma-api.polymarket.com/markets?closed=false&limit=100');
+    // Using Polymarket's gamma API for active BTC markets
+    const response = await fetch('https://gamma-api.polymarket.com/markets?closed=false&active=true&limit=200');
     const data = await response.json();
     
-    // Find BTC related market
+    // Find the most recent "Bitcoin Up or Down" market
     const btcMarket = data.find(m => 
-      m.question && (
-        m.question.toLowerCase().includes('bitcoin') || 
-        m.question.toLowerCase().includes('btc')
-      ) && m.question.toLowerCase().includes('price')
+      m.question && 
+      m.question.includes('Bitcoin') && 
+      m.question.includes('Up or Down')
     );
     
-    if (btcMarket && btcMarket.outcomePrices) {
-      // Get the price from the market
-      const price = btcMarket.outcomePrices[0] || btcMarket.outcomePrices[1];
-      polymarketPrice = (parseFloat(price) * 100000).toFixed(2);
-      console.log(`📊 Polymarket Market: ${btcMarket.question}`);
+    if (btcMarket) {
+      console.log(`📊 Found Polymarket Market: "${btcMarket.question}"`);
+      
+      // Try to extract the target price from description or market data
+      if (btcMarket.description) {
+        const priceMatch = btcMarket.description.match(/\$([0-9,]+(?:\.[0-9]{2})?)/);
+        if (priceMatch) {
+          polymarketPrice = priceMatch[1].replace(/,/g, '');
+          console.log(`✅ Polymarket target price: ${polymarketPrice}`);
+          return;
+        }
+      }
+      
+      // If no price in description, try to get it from the market metadata
+      if (btcMarket.markets && btcMarket.markets[0]) {
+        const market = btcMarket.markets[0];
+        if (market.groupItemTitle) {
+          const priceMatch = market.groupItemTitle.match(/\$([0-9,]+(?:\.[0-9]{2})?)/);
+          if (priceMatch) {
+            polymarketPrice = priceMatch[1].replace(/,/g, '');
+            console.log(`✅ Polymarket target price: ${polymarketPrice}`);
+            return;
+          }
+        }
+      }
+      
+      console.log('⚠️  Could not extract price from Polymarket market data');
     } else {
-      console.log('⚠️  BTC market not found on Polymarket');
+      console.log('⚠️  No active Bitcoin Up or Down markets found');
     }
   } catch (error) {
     console.error('❌ Error fetching Polymarket price:', error.message);
