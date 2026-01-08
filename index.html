@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BTC Price Monitor</title>
+  <style>
+    body { font-family: Arial; text-align: center; background: #000; color: #0f0; }
+    .price { font-size: 48px; margin: 20px; }
+    .exchange { display: inline-block; width: 300px; }
+    table { margin: 20px auto; border-collapse: collapse; }
+    th, td { padding: 10px; border: 1px solid #333; }
+  </style>
+</head>
+<body>
+  <h1>Live BTC Prices</h1>
+  <div id="prices">
+    <div class="exchange">
+      <h2>Coinbase</h2>
+      <div class="price" id="cb-price">-</div>
+    </div>
+    <div class="exchange">
+      <h2>Kraken</h2>
+      <div class="price" id="kr-price">-</div>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>Exchange</th><th>Last Price</th><th>Timestamp</th></tr></thead>
+    <tbody id="table-body"></tbody>
+  </table>
+
+  <script>
+    const ws = new WebSocket(`wss://${window.location.host}/`);
+    ws.onopen = () => console.log('Connected to server');
+    ws.onmessage = (event) => {
+      const { prices } = JSON.parse(event.data);
+      if (prices.coinbase) {
+        document.getElementById('cb-price').textContent = `$${prices.coinbase.price.toLocaleString()}`;
+      }
+      if (prices.kraken) {
+        document.getElementById('kr-price').textContent = `$${prices.kraken.price.toLocaleString()}`;
+      }
+      updateTable(prices);
+    };
+
+    function updateTable(prices) {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = `
+        ${prices.coinbase ? `<tr><td>Coinbase</td><td>$${prices.coinbase.price.toLocaleString()}</td><td>${new Date(prices.coinbase.ts).toLocaleTimeString()}</td></tr>` : ''}
+        ${prices.kraken ? `<tr><td>Kraken</td><td>$${prices.kraken.price.toLocaleString()}</td><td>${new Date(prices.kraken.ts).toLocaleTimeString()}</td></tr>` : ''}
+      `;
+    }
+  </script>
+</body>
+</html>
