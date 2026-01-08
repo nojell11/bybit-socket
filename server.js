@@ -13,27 +13,35 @@ const wss = new WebSocketServer({ server });
 const clients = new Set();
 
 wss.on('connection', (ws) => {
-  console.log('Client connected');
+  console.log('👤 Client connected (total:', clients.size, ')');
   clients.add(ws);
   ws.send(JSON.stringify({ type: 'connected', prices: {} }));
+  
   ws.on('close', () => {
-    console.log('Client disconnected');
+    console.log('👤 Client disconnected');
     clients.delete(ws);
   });
+  
+  // Ping clients every 30s (Railway WS keepalive)
+  const pingInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) ws.ping();
+  }, 30000);
+  
+  ws.on('pong', () => console.log('🏓 Client pong'));
 });
 
 let prices = { coinbase: null, kraken: null };
 
-let reconnectAttemptsCB = 0, reconnectAttemptsKR = 0;
-const MAX_RECONNECTS = 10;
+let reconnectCB = 0, reconnectKR = 0;
+const MAX_RECONNECT = 10;
 
-// Safe broadcast
 function broadcastPrices() {
-  const safePrices = {};
-  if (prices.coinbase && typeof prices.coinbase.price === 'number') safePrices.coinbase = prices.coinbase;
-  if (prices.kraken && typeof prices.kraken.price === 'number') safePrices.kraken = prices.kraken;
-  const payload = { prices: safePrices, ts: Date.now() };
-  console.log('Broadcasting:', payload);
+  const safe = {};
+  if (prices.coinbase?.price) safe.coinbase = prices.coinbase;
+  if (prices.kraken?.price) safe.kraken = prices.kraken;
+  const payload = { prices: safe, ts: Date.now() };
+  console.log('📡 Broadcasting:', JSON.stringify(payload).slice(0, 80) + '...');
+  
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify(payload));
@@ -41,82 +49,82 @@ function broadcastPrices() {
   }
 }
 
-// Coinbase WS (Advanced Trade)
+// Heartbeat
+setInterval(broadcastPrices, 30000);
+
 function connectCoinbase() {
-  console.log('Connecting Coinbase...');
+  console.log('🔵 Connecting Coinbase...');
   const ws = new WebSocket('wss://advanced-trade-ws.coinbase.com');
+  
   ws.on('open', () => {
-    console.log('Coinbase connected');
-    reconnectAttemptsCB = 0;
+    console.log('🔵 Coinbase CONNECTED');
+    reconnectCB = 0;
     ws.send(JSON.stringify({
       type: 'subscribe',
       product_ids: ['BTC-USD'],
       channel: 'ticker'
     }));
   });
+  
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
+      console.log('🔵 Coinbase RAW:', JSON.stringify(msg).slice(0, 100));
       if (msg.type === 'ticker' && msg.price) {
         const price = parseFloat(msg.price);
-        console.log('Coinbase tick:', price);
+        console.log('💰 Coinbase TICK:', price);
         prices.coinbase = { price, ts: Date.now() };
         broadcastPrices();
       }
     } catch (e) {
-      console.error('Coinbase parse error:', e);
+      console.error('🔵 Coinbase ERROR:', e);
     }
   });
-  ws.on('error', (err) => console.error('Coinbase error:', err));
+  
   ws.on('close', () => {
-    console.log('Coinbase closed');
-    if (reconnectAttemptsCB++ < MAX_RECONNECTS) {
-      setTimeout(connectCoinbase, 2000 * reconnectAttemptsCB);
-    }
+    console.log('🔵 Coinbase DISCONNECTED');
+    if (reconnectCB++ < MAX_RECONNECT) setTimeout(connectCoinbase, 2000 * reconnectCB);
   });
+  
+  ws.on('error', (err) => console.error('🔵 Coinbase WS ERROR:', err.message));
 }
 
-// Kraken WS v1 (works reliably)
 function connectKraken() {
-  console.log('Connecting Kraken...');
+  console.log('🔴 Connecting Kraken...');
   const ws = new WebSocket('wss://ws.kraken.com');
+  
   ws.on('open', () => {
-    console.log('Kraken connected');
-    reconnectAttemptsKR = 0;
+    console.log('🔴 Kraken CONNECTED');
+    reconnectKR = 0;
     ws.send(JSON.stringify({
       event: 'subscribe',
       pair: ['XBT/USD'],
       subscription: { name: 'ticker' }
     }));
   });
+  
   ws.on('message', (data) => {
     try {
       const msgs = JSON.parse(data.toString());
-      if (Array.isArray(msgs) && msgs.length > 1) {
-        const tickerData = msgs[1];
-        if (tickerData && tickerData.c) {
-          const price = parseFloat(tickerData.c[0]);
-          console.log('Kraken tick:', price);
-          prices.kraken = { price, ts: Date.now() };
-          broadcastPrices();
-        }
+      if (Array.isArray(msgs) && msgs[1]?.c) {
+        const price = parseFloat(msgs[1].c[0]);
+        console.log('💰 Kraken TICK:', price);
+        prices.kraken = { price, ts: Date.now() };
+        broadcastPrices();
       }
     } catch (e) {
-      console.error('Kraken parse error:', e);
+      console.error('🔴 Kraken ERROR:', e);
     }
   });
-  ws.on('error', (err) => console.error('Kraken error:', err));
+  
   ws.on('close', () => {
-    console.log('Kraken closed');
-    if (reconnectAttemptsKR++ < MAX_RECONNECTS) {
-      setTimeout(connectKraken, 2000 * reconnectAttemptsKR);
-    }
+    console.log('🔴 Kraken DISCONNECTED');
+    if (reconnectKR++ < MAX_RECONNECT) setTimeout(connectKraken, 2000 * reconnectKR);
   });
+  
+  ws.on('error', (err) => console.error('🔴 Kraken WS ERROR:', err.message));
 }
 
-// Start connections
+// START
 connectCoinbase();
 connectKraken();
-
-// Heartbeat every 30s
-setInterval(broadcastPrices, 30000);
