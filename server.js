@@ -2,7 +2,7 @@
 import WebSocket from 'ws';
 import express from 'express';
 import http from 'http';
-import { RealtimeServiceV2 } from '@polymarket/sdk';
+import { RealTimeDataClient } from '@polymarket/real-time-data-client';
 
 const app = express();
 const server = http.createServer(app);
@@ -33,7 +33,7 @@ function connectCoinbase() {
   });
 
   coinbaseWs.on('error', (error) => {
-    console.error('❌ Coinbase WebSocket error:', error);
+    console.error('❌ Coinbase WebSocket error:', error.message);
   });
 
   coinbaseWs.on('close', () => {
@@ -42,42 +42,50 @@ function connectCoinbase() {
   });
 }
 
-// Connect to Polymarket WebSocket for BTC price
+// Connect to Polymarket WebSocket using official client
 function connectPolymarket() {
   console.log('🔌 Connecting to Polymarket WebSocket...');
   
-  const realtime = new RealtimeServiceV2({ debug: false });
-  
-  realtime.once('connected', () => {
-    console.log('✅ Connected to Polymarket WebSocket');
-    
-    // Subscribe to BTC price updates
-    const cryptoSub = realtime.subscribeCryptoPrices(['BTCUSDT'], {
-      onPrice: (price) => {
-        if (price.symbol === 'BTCUSDT') {
-          polymarketPrice = price.price.toFixed(2);
-          console.log(`📊 Polymarket BTC Update: $${polymarketPrice}`);
-          broadcastPrices();
+  const client = new RealTimeDataClient({
+    onConnect: (c) => {
+      console.log('✅ Connected to Polymarket WebSocket');
+      
+      // Subscribe to BTC crypto price
+      c.subscribe({
+        subscriptions: [{
+          topic: 'crypto_prices',
+          type: 'update',
+          filters: '["BTCUSDT"]'
+        }]
+      });
+      
+      console.log('✅ Subscribed to Polymarket BTC prices');
+    },
+    onMessage: (c, message) => {
+      try {
+        if (message.topic === 'crypto_prices' && message.type === 'update') {
+          const payload = message.payload;
+          if (payload && payload.symbol === 'BTCUSDT') {
+            polymarketPrice = parseFloat(payload.price).toFixed(2);
+            console.log(`📊 Polymarket BTC Update: $${polymarketPrice}`);
+            broadcastPrices();
+          }
         }
-      },
-      onError: (error) => {
-        console.error('❌ Polymarket price error:', error);
+      } catch (error) {
+        console.error('❌ Error processing Polymarket message:', error.message);
       }
-    });
-    
-    console.log(`✅ Subscribed to Polymarket BTC prices (ID: ${cryptoSub.id})`);
+    },
+    onStatusChange: (status) => {
+      console.log(`📡 Polymarket status: ${status}`);
+      if (status === 'disconnected') {
+        console.log('⚠️  Polymarket disconnected. Reconnecting...');
+      }
+    },
+    autoReconnect: true,
+    pingInterval: 5000
   });
 
-  realtime.on('error', (error) => {
-    console.error('❌ Polymarket WebSocket error:', error);
-  });
-
-  realtime.on('disconnected', () => {
-    console.log('⚠️  Polymarket disconnected. Reconnecting...');
-    setTimeout(connectPolymarket, 5000);
-  });
-
-  realtime.connect();
+  client.connect();
 }
 
 // Log prices every second
@@ -139,6 +147,13 @@ app.get('/', (req, res) => {
         h1 { color: #00ff00; }
         .price { font-size: 24px; margin: 10px 0; }
         .status { color: #ffff00; }
+        .diff { 
+          font-size: 14px; 
+          color: ${coinbasePrice && polymarketPrice ? 
+            (Math.abs(parseFloat(coinbasePrice) - parseFloat(polymarketPrice)) > 10 ? '#ff0000' : '#00ff00') 
+            : '#ffff00'
+          };
+        }
       </style>
     </head>
     <body>
@@ -146,8 +161,13 @@ app.get('/', (req, res) => {
       <div class="status">✅ Server is running</div>
       <div class="price">💰 Coinbase BTC: $${coinbasePrice || 'Loading...'}</div>
       <div class="price">📊 Polymarket BTC: $${polymarketPrice || 'Loading...'}</div>
+      ${coinbasePrice && polymarketPrice ? 
+        `<div class="diff">📈 Difference: $${Math.abs(parseFloat(coinbasePrice) - parseFloat(polymarketPrice)).toFixed(2)}</div>` 
+        : ''
+      }
       <p>Connect to WebSocket: <code>wss://${req.headers.host}</code></p>
       <p>Active connections: ${wss.clients.size}</p>
+      <p style="color: #888; font-size: 12px;">Using official Polymarket WebSocket (crypto_prices)</p>
     </body>
     </html>
   `);
@@ -158,6 +178,8 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     coinbase: coinbasePrice, 
     polymarket: polymarketPrice,
+    difference: coinbasePrice && polymarketPrice ? 
+      Math.abs(parseFloat(coinbasePrice) - parseFloat(polymarketPrice)).toFixed(2) : null,
     clients: wss.clients.size,
     timestamp: new Date().toISOString()
   });
