@@ -250,8 +250,8 @@ app.get('/', (req, res) => {
         </div>
         
         <div class="price-card">
-          <div class="label">📊 Polymarket BTC</div>
-          <div class="price">$${polymarketPrice || 'Loading...'}</div>
+          <div class="label">📊 Polymarket BTC (Kraken)</div>
+          <div class="price">${polymarketPrice || 'Loading...'}</div>
         </div>
         
         ${coinbasePrice && polymarketPrice ? 
@@ -262,8 +262,9 @@ app.get('/', (req, res) => {
           <p><strong>WebSocket:</strong> <code>wss://${req.headers.host}</code></p>
           <p><strong>Active Connections:</strong> ${wss.clients.size}</p>
           <p style="margin-top: 15px; font-size: 11px;">
-            Using official Polymarket RTDS (Real-Time Data Stream) WebSocket for crypto prices.
-            Comparing Coinbase exchange vs Polymarket's official BTC price feed.
+            Polymarket's public WebSocket doesn't provide crypto prices without authentication.
+            Using Kraken as comparison (a data source that Chainlink/Polymarket aggregates from).
+            Comparing Coinbase vs Kraken BTC prices in real-time.
           </p>
         </div>
       </div>
