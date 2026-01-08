@@ -1,33 +1,116 @@
-<script>
-  const ws = new WebSocket(`wss://${window.location.host}/`);
-  ws.onopen = () => console.log('Connected to server');
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      const { prices } = data || {};
-      
-      // Safe check before accessing price
-      if (prices?.coinbase?.price !== undefined) {
-        document.getElementById('cb-price').textContent = `$${prices.coinbase.price.toLocaleString()}`;
-      }
-      if (prices?.kraken?.price !== undefined) {
-        document.getElementById('kr-price').textContent = `$${prices.kraken.price.toLocaleString()}`;
-      }
-      updateTable(prices);
-    } catch (e) {
-      console.error('Parse error:', e, event.data);
-    }
-  };
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BTC Price Monitor</title>
+  <style>
+    body { font-family: Arial; text-align: center; background: #000; color: #0f0; margin: 0; padding: 20px; }
+    h1 { font-size: 2em; }
+    .prices { display: flex; justify-content: center; gap: 50px; margin: 30px 0; }
+    .exchange { background: #111; padding: 20px; border-radius: 10px; min-width: 200px; }
+    .exchange h2 { margin: 0 0 10px 0; color: #fff; }
+    .price { font-size: 3em; font-weight: bold; color: #0f0; min-height: 1em; }
+    table { margin: 30px auto; border-collapse: collapse; background: #111; border-radius: 10px; overflow: hidden; }
+    th, td { padding: 15px 20px; border-bottom: 1px solid #333; color: #fff; }
+    th { background: #222; }
+    tr:hover { background: #222; }
+    .status { font-size: 0.8em; color: #888; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>🔴 Live BTC Prices</h1>
+  <div class="prices">
+    <div class="exchange">
+      <h2>🟦 Coinbase</h2>
+      <div class="price" id="cb-price">-</div>
+    </div>
+    <div class="exchange">
+      <h2>🔴 Kraken</h2>
+      <div class="price" id="kr-price">-</div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Exchange</th><th>Last Price</th><th>Updated</th></tr>
+    </thead>
+    <tbody id="table-body">
+      <tr><td colspan="3">Connecting to feeds...</td></tr>
+    </tbody>
+  </table>
+  <div class="status" id="status">Status: Connecting...</div>
 
-  function updateTable(prices) {
-    const tbody = document.getElementById('table-body');
-    let html = '';
-    if (prices?.coinbase?.price !== undefined) {
-      html += `<tr><td>Coinbase</td><td>$${prices.coinbase.price.toLocaleString()}</td><td>${new Date(prices.coinbase.ts).toLocaleTimeString()}</td></tr>`;
+  <script>
+    const ws = new WebSocket(`wss://${window.location.host}/`);
+    const statusEl = document.getElementById('status');
+    
+    ws.onopen = () => {
+      console.log('✅ Connected to server');
+      statusEl.textContent = 'Status: Live - Waiting for ticks';
+    };
+    
+    ws.onclose = () => {
+      console.log('❌ Server disconnected');
+      statusEl.textContent = 'Status: Disconnected - Reloading...';
+      setTimeout(() => location.reload(), 3000);
+    };
+    
+    ws.onerror = (err) => console.error('WS error:', err);
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('📊 Received:', data);
+        const prices = data?.prices || {};
+        
+        // Coinbase
+        const cbEl = document.getElementById('cb-price');
+        if (prices.coinbase && typeof prices.coinbase.price === 'number') {
+          cbEl.textContent = `$${prices.coinbase.price.toLocaleString()}`;
+        } else {
+          cbEl.textContent = '-';
+        }
+        
+        // Kraken
+        const krEl = document.getElementById('kr-price');
+        if (prices.kraken && typeof prices.kraken.price === 'number') {
+          krEl.textContent = `$${prices.kraken.price.toLocaleString()}`;
+        } else {
+          krEl.textContent = '-';
+        }
+        
+        updateTable(prices);
+      } catch (e) {
+        console.error('❌ Parse error:', e, event.data);
+      }
+    };
+    
+    function updateTable(prices) {
+      const tbody = document.getElementById('table-body');
+      const rows = [];
+      
+      if (prices.coinbase && typeof prices.coinbase.price === 'number') {
+        rows.push(`
+          <tr>
+            <td>🟦 Coinbase</td>
+            <td>$${prices.coinbase.price.toLocaleString()}</td>
+            <td>${new Date(prices.coinbase.ts).toLocaleTimeString()}</td>
+          </tr>
+        `);
+      }
+      
+      if (prices.kraken && typeof prices.kraken.price === 'number') {
+        rows.push(`
+          <tr>
+            <td>🔴 Kraken</td>
+            <td>$${prices.kraken.price.toLocaleString()}</td>
+            <td>${new Date(prices.kraken.ts).toLocaleTimeString()}</td>
+          </tr>
+        `);
+      }
+      
+      tbody.innerHTML = rows.length 
+        ? rows.join('') 
+        : '<tr><td colspan="3">⏳ Waiting for first price tick...</td></tr>';
     }
-    if (prices?.kraken?.price !== undefined) {
-      html += `<tr><td>Kraken</td><td>$${prices.kraken.price.toLocaleString()}</td><td>${new Date(prices.kraken.ts).toLocaleTimeString()}</td></tr>`;
-    }
-    tbody.innerHTML = html || '<tr><td colspan="3">Waiting for ticks...</td></tr>';
-  }
-</script>
+  </script>
+</body>
+</html>
