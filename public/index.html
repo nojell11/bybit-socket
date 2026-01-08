@@ -1,50 +1,161 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>🚀 BTC Arb Monitor</title>
-  <style>/* Same CSS as before */</style>
+  <title>🚀 BTC Live Monitor</title>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; 
+      background: linear-gradient(135deg, #000, #1a1a2e); 
+      color: #0f0; 
+      min-height: 100vh; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      padding: 20px; 
+    }
+    h1 { font-size: 2.5rem; margin-bottom: 2rem; text-shadow: 0 0 20px #0f0; }
+    .prices { display: flex; gap: 4rem; margin-bottom: 2rem; }
+    .exchange { 
+      background: rgba(0,255,0,0.1); 
+      padding: 2rem; 
+      border-radius: 20px; 
+      border: 1px solid #0f0; 
+      backdrop-filter: blur(10px); 
+      min-width: 250px; 
+    }
+    .exchange h2 { margin-bottom: 1rem; opacity: 0.8; }
+    .price { 
+      font-size: 3.5rem; 
+      font-weight: 900; 
+      min-height: 4rem; 
+      text-shadow: 0 0 30px #0f0; 
+    }
+    table { 
+      background: rgba(255,255,255,0.05); 
+      border-radius: 15px; 
+      overflow: hidden; 
+      box-shadow: 0 20px 40px rgba(0,255,0,0.1); 
+      backdrop-filter: blur(20px); 
+    }
+    th, td { padding: 1rem 2rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    th { background: rgba(0,255,0,0.2); }
+    tr:hover { background: rgba(0,255,0,0.1); }
+    .status { margin-top: 2rem; font-size: 1.1rem; opacity: 0.8; }
+    .loading { animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+  </style>
 </head>
 <body>
-  <!-- Same HTML structure -->
+  <h1>🔴 Live BTC Arb Monitor</h1>
+  
+  <div class="prices">
+    <div class="exchange">
+      <h2>🟦 Coinbase</h2>
+      <div class="price loading" id="cb-price">-</div>
+    </div>
+    <div class="exchange">
+      <h2>🔴 Kraken</h2>
+      <div class="price loading" id="kr-price">-</div>
+    </div>
+  </div>
+  
+  <table>
+    <thead>
+      <tr>
+        <th>Exchange</th>
+        <th>Price</th>
+        <th>Last Update</th>
+      </tr>
+    </thead>
+    <tbody id="table-body">
+      <tr><td colspan="3" style="text-align:center">Connecting live feeds...</td></tr>
+    </tbody>
+  </table>
+  
+  <div class="status" id="status">Status: Initializing...</div>
+
   <script>
-    let ws, reconnectCount = 0;
+    let wsCount = 0;
+    let tickCount = 0;
     
-    function initWS() {
-      ws = new WebSocket(`wss://${window.location.host}/`);
+    // Wait for DOM
+    function init() {
+      const ws = new WebSocket(`wss://${window.location.host}/`);
       
       ws.onopen = () => {
-        console.log('✅ WS #' + (++reconnectCount) + ' LIVE');
-        document.getElementById('status').textContent = `Live (${reconnectCount})`;
+        wsCount++;
+        console.log(`✅ WS #${wsCount} LIVE`);
+        document.getElementById('status').textContent = `✅ LIVE (${wsCount}) | Ticks: ${tickCount}`;
       };
       
       ws.onclose = () => {
-        console.log('❌ WS closed, reconnecting...');
-        document.getElementById('status').textContent = 'Reconnecting...';
-        setTimeout(initWS, 1000 * reconnectCount);
+        console.log('❌ WS closed');
+        document.getElementById('status').textContent = '❌ Reconnecting...';
+        setTimeout(init, 1000);
       };
       
+      ws.onerror = (e) => console.error('WS error:', e);
+      
       ws.onmessage = (event) => {
-        console.log('📊 LIVE TICK:', event.data);
+        tickCount++;
+        console.log(`📊 TICK #${tickCount}:`, event.data);
+        
         try {
           const data = JSON.parse(event.data);
           const prices = data.prices || {};
-          updateUI(prices);
+          updatePrices(prices);
+          document.getElementById('status').textContent = `✅ LIVE | Ticks: ${tickCount} | Kraken: ${prices.kraken?.price || '-'}`;
         } catch(e) {
-          console.error('Parse fail:', event.data);
+          console.error('Parse error:', event.data);
         }
       };
     }
     
-    function updateUI(prices) {
-      // Safe price updates (same logic)
-      document.getElementById('cb-price').textContent = 
-        prices.coinbase?.price ? `$${prices.coinbase.price.toLocaleString()}` : '-';
-      document.getElementById('kr-price').textContent = 
-        prices.kraken?.price ? `$${prices.kraken.price.toLocaleString()}` : '-';
-      // Update table...
+    function updatePrices(prices) {
+      // Coinbase
+      const cbEl = document.getElementById('cb-price');
+      if (cbEl) {
+        cbEl.textContent = prices.coinbase?.price ? 
+          `$${prices.coinbase.price.toLocaleString()}` : '-';
+        cbEl.classList.toggle('loading', !prices.coinbase?.price);
+      }
+      
+      // Kraken  
+      const krEl = document.getElementById('kr-price');
+      if (krEl) {
+        krEl.textContent = prices.kraken?.price ? 
+          `$${prices.kraken.price.toLocaleString()}` : '-';
+        krEl.classList.toggle('loading', !prices.kraken?.price);
+      }
+      
+      // Table
+      const tbody = document.getElementById('table-body');
+      if (tbody) {
+        tbody.innerHTML = `
+          ${prices.coinbase?.price ? `
+            <tr>
+              <td>🟦 Coinbase</td>
+              <td>$${prices.coinbase.price.toLocaleString()}</td>
+              <td>${new Date(prices.coinbase.ts).toLocaleTimeString()}</td>
+            </tr>` : ''}
+          ${prices.kraken?.price ? `
+            <tr>
+              <td>🔴 Kraken</td>
+              <td>$${prices.kraken.price.toLocaleString()}</td>
+              <td>${new Date(prices.kraken.ts).toLocaleTimeString()}</td>
+            </tr>` : ''}
+        `;
+      }
     }
     
-    initWS(); // Auto-reconnect WS
+    // DOM ready → start WS
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>
